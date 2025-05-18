@@ -1,101 +1,211 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 
 function UserDashboard() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [results, setResults] = useState([]);
+  const [input, setInput] = useState('');
+  const [chatLog, setChatLog] = useState([]);
   const [loading, setLoading] = useState(false);
-  const lastResultRef = useRef(null);
+  const chatEndRef = useRef(null);
 
-  const fetchResults = async () => {
-    if (!searchQuery.trim()) return;
+  // const typeText = async (text, callback) => {
+  //   let index = 0;
+  //   let typed = '';
+  //   const interval = setInterval(() => {
+  //     typed += text[index];
+  //     callback(typed);
+  //     index++;
+  //     if (index >= text.length) clearInterval(interval);
+  //   }, 20);
+  // };
 
+  const handleSearch = async () => {
+    if (!input.trim()) return;
+  
+    const userMessage = { type: 'user', text: input };
+    setChatLog(prev => [...prev, userMessage]);
+    setInput('');
     setLoading(true);
+  
+    const botPlaceholder = { type: 'bot', text: 'Loading ...' };
+    setChatLog(prev => [...prev, botPlaceholder]);
+  
     try {
       const response = await axios.get('http://localhost:4000/api/content/search', {
-        params: { q: searchQuery }
+        params: { q: input }
       });
-      console.log('API Response:', response.data);
-      setResults([response.data]); // Use array to manage multiple results
-    } catch (error) {
-      console.error('Search failed', error);
-      setResults([]);
+  
+      const results = Array.isArray(response.data) ? response.data : [response.data];
+      let finalBotText = '';
+  
+      if (results && results.length > 0 && results[0]) {
+        const intros = [
+          "Here's something that might help:",
+          "Take a look at this:",
+          "This might answer your question:",
+          "Here's a useful snippet:",
+          "Let me explain:"
+        ];
+  
+        finalBotText = results.map((r, i) => {
+          const intro = intros[Math.floor(Math.random() * intros.length)];
+  
+          const title = r.title ? `<strong>${r.title}</strong><br/>` : '';
+          const message = r.message ? `<div class="content-ms">${r.message}</div><br/>` : '';
+          const func = r.function_field ? `<pre><code>${r.function_field}</code></pre>` : '';
+  
+          return `${i + 1}. ${intro}<br/>${title}${message}${func}`;
+        }).join('<br/><br/>');
+      } else {
+        finalBotText = '🤖 I couldn’t find anything matching that. Try rephrasing your question!';
+      }
+  
+      // Add delay before typing starts
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Remove placeholder
+      setChatLog(prev => prev.slice(0, -1));
+  
+      // Add an empty bot message
+      setChatLog(prev => [...prev, { type: 'bot', text: '' }]);
+  
+      // Simulate typing effect with rich HTML content
+      let index = 0;
+      const typingSpeed = 10;
+      const interval = setInterval(() => {
+        index += 1;
+        setChatLog(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1].text = finalBotText.slice(0, index);
+          return [...updated];
+        });
+        if (index >= finalBotText.length) {
+          clearInterval(interval);
+        }
+      }, typingSpeed);
+  
+    } catch (err) {
+      console.error('Search failed:', err);
+      setChatLog(prev => [...prev.slice(0, -1), { type: 'bot', text: '🤖 Something went wrong. Please try again.' }]);
     } finally {
       setLoading(false);
     }
   };
+  
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
-      fetchResults();
+      e.preventDefault();
+      handleSearch();
     }
   };
 
+  const handleCopy = (text) => {
+    navigator.clipboard.writeText(text);
+    alert('Copied to clipboard!');
+  };
+
   useEffect(() => {
-    if (lastResultRef.current) {
-      lastResultRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [results]);
+  }, [chatLog]);
 
   return (
-    <div style={{ padding: '2rem', fontFamily: 'Arial', maxWidth: '800px', margin: '0 auto' }}>
-      <h2>🧠 Smart AI-Like Search</h2>
+    <div style={{ padding: '2rem', fontFamily: 'Arial', maxWidth: '600px', margin: '0 auto' }}>
+      <h2>🤖 Smart Chat Bot</h2>
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
+      <div style={{
+        border: '1px solid #ccc',
+        borderRadius: '8px',
+        padding: '1rem',
+        minHeight: '400px',
+        background: '#f9f9f9',
+        overflowY: 'auto',
+        maxHeight: '500px'
+      }}>
+        {chatLog.map((chat, index) => {
+          const codeBlocks = [];
+          const htmlParts = chat.text.split(/<pre><code>|<\/code><\/pre>/g);
+
+          htmlParts.forEach((part, i) => {
+            if (i % 2 === 1) {
+              codeBlocks.push(part);
+            }
+          });
+
+          return (
+            <div
+              key={index}
+              style={{
+                textAlign: chat.type === 'user' ? 'right' : 'left',
+                marginBottom: '1rem',
+              }}
+            >
+              <div
+                style={{
+                  display: 'inline-block',
+                  background: chat.type === 'user' ? '#007bff' : '#f0f0f0',
+                  color: chat.type === 'user' ? '#fff' : '#000',
+                  padding: '10px 14px',
+                  borderRadius: '16px',
+                  maxWidth: '80%',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {/* Message with inner HTML rendering (from WYSIWYG) */}
+                <div
+                  dangerouslySetInnerHTML={{ __html: htmlParts[0] }}
+                  style={{ marginBottom: codeBlocks.length > 0 ? '10px' : '0' }}
+                />
+
+                {/* Render each code block with copy button */}
+                {codeBlocks.map((codeText, i) => (
+                  <div key={i} style={{ position: 'relative', marginTop: '10px' }}>
+                    <pre
+                      style={{
+                        background: '#eee',
+                        padding: '10px',
+                        borderRadius: '8px',
+                        overflowX: 'auto',
+                      }}
+                    >
+                      <code>{codeText}</code>
+                    </pre>
+                    <button
+                      onClick={() => handleCopy(codeText)}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        fontSize: '12px',
+                        padding: '2px 6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        <div ref={chatEndRef}></div>
+      </div>
+
+      <div style={{ display: 'flex', marginTop: '1rem', gap: '1rem' }}>
         <input
           type="text"
           placeholder="Ask something..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyPress}
           style={{ flex: 1, padding: '10px', fontSize: '1rem' }}
         />
-        <button onClick={fetchResults} style={{ padding: '10px 16px' }}>Search</button>
+        <button onClick={handleSearch} style={{ padding: '10px 16px' }}>Send</button>
       </div>
 
-      {loading && <p>Searching...</p>}
-
-      <div style={{ marginTop: '2rem' }}>
-        {results.length > 0 ? (
-          results.map((result, index) => (
-            <div
-              ref={lastResultRef}
-              key={result._id || index}
-              style={{
-                background: '#f1f1f1',
-                borderRadius: '16px',
-                padding: '1rem',
-                marginBottom: '1rem',
-                maxWidth: '90%',
-                boxShadow: '0 2px 5px rgba(0,0,0,0.1)',
-              }}
-            >
-              <p style={{ fontSize: '0.9rem', color: '#555' }}>
-                <strong>{result.title || 'No title available'}</strong>
-              </p>
-              <p style={{ marginTop: '0.5rem' }}>{result.message || 'No message available'}</p>
-
-              <pre style={{ backgroundColor: '#f4f4f4', padding: '10px', borderRadius: '8px', marginTop: '1rem' }}>
-                <code>{result.function || 'No function available'}</code>
-              </pre>
-            </div>
-          ))
-        ) : (
-          <div
-            style={{
-              background: '#fff3cd',
-              borderRadius: '16px',
-              padding: '1rem',
-              marginTop: '1rem',
-              maxWidth: '90%',
-              color: '#856404',
-              border: '1px solid #ffeeba',
-            }}
-          >
-            🤖 <em>Need more information.</em>
-          </div>
-        )}
-      </div>
+      {loading && <p style={{ marginTop: '1rem' }}>Typing...</p>}
     </div>
   );
 }
