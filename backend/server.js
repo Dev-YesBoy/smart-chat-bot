@@ -29,39 +29,53 @@ app.get('/api/content', async (req, res) => {
   }
 });
 
-// Smart search (return first closest match)
+// Smart search (match by prompt field)
 app.get('/api/content/search', async (req, res) => {
   const { q = '' } = req.query;
   if (!q) return res.json(null);
 
   try {
     const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.execute(
-      `SELECT * FROM content 
-       WHERE title LIKE ? OR message LIKE ? OR function_field LIKE ? 
-       ORDER BY createdAt DESC LIMIT 1`,
-      [`%${q}%`, `%${q}%`, `%${q}%`]
-    );
+    const [rows] = await conn.execute('SELECT * FROM content ORDER BY createdAt DESC');
     await conn.end();
-    res.json(rows[0] || null);
+
+    // Search by matching `q` to prompts
+    const matched = rows.find(item => {
+      if (!item.prompts) return false;
+      try {
+        const prompts = JSON.parse(item.prompts);
+        return prompts.some(p => p.toLowerCase().trim() === q.toLowerCase().trim());
+      } catch (e) {
+        console.warn('Invalid JSON in prompts for item:', item.id);
+        return false;
+      }
+    });
+
+    if (matched) {
+      return res.json(matched);
+    } else {
+      return res.json({ message: "Sorry, I did not understand." });
+    }
   } catch (err) {
     console.error('Search error:', err);
     res.status(500).json({ error: 'Search error' });
   }
 });
 
+
 // Add new content
 app.post('/api/content', async (req, res) => {
-  const { title, message, function: func } = req.body;
+  // const { title, message, function: func } = req.body;
+  const { title, message, function_field, prompts } = req.body;
 
   try {
     const conn = await mysql.createConnection(dbConfig);
     const [result] = await conn.execute(
-      'INSERT INTO content (title, message, function_field) VALUES (?, ?, ?)',
-      [title, message, func]
+      `INSERT INTO content (title, message, function_field, prompts) VALUES (?, ?, ?, ?)`,
+      [title, message, function_field, prompts || null]
     );
     await conn.end();
-    res.status(201).json({ id: result.insertId, title, message, function_field: func });
+    res.status(201).json({ id: result.insertId, title, message, function_field, prompts });
   } catch (err) {
     console.error('Insert error:', err);
     res.status(500).json({ error: 'Insert error' });
@@ -70,19 +84,20 @@ app.post('/api/content', async (req, res) => {
 
 // Update content
 app.put('/api/content/:id', async (req, res) => {
-  const { title, message, function: func } = req.body;
   const { id } = req.params;
+  const { title, message, function_field, prompts } = req.body;
 
   try {
     const conn = await mysql.createConnection(dbConfig);
     await conn.execute(
-      'UPDATE content SET title=?, message=?, function_field=? WHERE id=?',
-      [title, message, func, id]
+      `UPDATE content SET title = ?, message = ?, function_field = ?, prompts = ? WHERE id = ?`,
+      [title, message, function_field || '', prompts || null, id]
     );
     await conn.end();
-    res.json({ id, title, message, function_field: func });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Update content error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
